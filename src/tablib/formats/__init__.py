@@ -33,6 +33,12 @@ uninstalled_format_messages = {
 
 
 def load_format_class(dotted_path):
+    """Import and return the format class at the given dotted path.
+
+    ``dotted_path`` is the fully qualified name of the class, e.g.
+    ``'tablib.formats._xlsx.XLSXFormat'``. Raises ``ImportError`` if
+    the path cannot be resolved to a class.
+    """
     try:
         module_path, class_name = dotted_path.rsplit('.', 1)
         return getattr(import_module(module_path), class_name)
@@ -76,6 +82,18 @@ class ImportExportSetDescriptor(FormatDescriptorBase):
 
 
 class Registry:
+    """Registry of the import/export formats available to Dataset and Databook.
+
+    Each format is registered under a short key (e.g. ``'csv'``,
+    ``'xlsx'``). Registering a format adds the corresponding ``<key>``
+    property and ``get_<key>`` / ``set_<key>`` methods to
+    :class:`tablib.Dataset` and the ``<key>`` property to
+    :class:`tablib.Databook`, so a custom format can be used exactly
+    like a built-in one. The module-level ``registry`` instance holds
+    the formats in use; see "Adding New Formats" in the development
+    documentation for a worked example.
+    """
+
     _formats = {}
 
     def _ensure_builtins_registered(self):
@@ -83,6 +101,14 @@ class Registry:
         from .. import core  # noqa: F401
 
     def register(self, key, format_or_path):
+        """Register a format under ``key``.
+
+        ``format_or_path`` is either a format instance or the dotted
+        path of the format class, which is then imported lazily on
+        first use. Registering a format makes it available as a
+        ``Dataset.<key>`` / ``Databook.<key>`` property and as
+        ``Dataset.get_<key>`` / ``Dataset.set_<key>`` methods.
+        """
         from ..core import Databook, Dataset
 
         # Create Databook.<format> read or read/write properties
@@ -100,6 +126,13 @@ class Registry:
         self._formats[key] = format_or_path
 
     def register_builtins(self):
+        """Register all built-in formats available in this environment.
+
+        Formats whose optional dependencies are not installed (e.g.
+        ``xlsx`` without openpyxl) are skipped. Registration order
+        matters for format auto-detection: ``xlsx`` is registered
+        before ``xls`` because xlrd can also read ``xlsx`` files.
+        """
         # Registration ordering matters for autodetection.
         self.register('json', JSONFormat())
         # xlsx before as xls (xlrd) can also read xlsx
@@ -125,6 +158,13 @@ class Registry:
             self.register('cli', 'tablib.formats._cli.CLIFormat')
 
     def formats(self):
+        """Yield the registered format instances, in registration order.
+
+        Built-in formats are registered first if that has not happened
+        yet, and formats registered by dotted path are imported on
+        first use. Used for format auto-detection; see
+        :func:`tablib.detect_format`.
+        """
         self._ensure_builtins_registered()
         for key, frm in self._formats.items():
             if isinstance(frm, str):
@@ -132,12 +172,20 @@ class Registry:
             yield self._formats[key]
 
     def get_format(self, key):
+        """Return the format registered under ``key``.
+
+        Formats registered by dotted path are imported on first use.
+        Raises :class:`tablib.exceptions.UnsupportedFormat` if no
+        format is registered under ``key``, including a hint about the
+        optional dependency to install when ``key`` names a known
+        format whose package is missing.
+        """
         self._ensure_builtins_registered()
         if key not in self._formats:
             if key in uninstalled_format_messages:
                 raise UnsupportedFormat(
                     "The '{key}' format is not available. You may want to install the "
-                    "{package_name} (or `pip install \"tablib[{extras_name}]\"`).".format(
+                    "{package_name} (or `pip install \"tablib[{extras_name}]\").".format(
                         **uninstalled_format_messages[key], key=key
                     )
                 )
